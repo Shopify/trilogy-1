@@ -816,6 +816,57 @@ class ClientTest < TrilogyTest
     client.close
   end
 
+  def test_query_flags_is_not_synchronized
+    # query_flags is a pure struct read (no socket I/O), so it must be safe
+    # to call while another method holds the synchronization mutex.
+    # ActiveRecord's query_with_flags calls query_flags/query_flags= around
+    # query, which would re-enter the mutex and raise SynchronizationError.
+    client = new_tcp_client
+    thread = Thread.new { client.query("SELECT SLEEP(1)") }
+    thread.join(0.2)
+
+    assert_kind_of Integer, client.query_flags
+
+    thread.join
+    client.close
+  end
+
+  def test_query_flags_set_is_not_synchronized
+    client = new_tcp_client
+    thread = Thread.new { client.query("SELECT SLEEP(1)") }
+    thread.join(0.2)
+
+    old_flags = client.query_flags
+    client.query_flags = old_flags
+
+    thread.join
+    client.close
+  end
+
+  def test_warning_count_is_not_synchronized
+    # warning_count is a pure struct read (no socket I/O).
+    client = new_tcp_client
+    thread = Thread.new { client.query("SELECT SLEEP(1)") }
+    thread.join(0.2)
+
+    assert_kind_of Integer, client.warning_count
+
+    thread.join
+    client.close
+  end
+
+  def test_more_results_exist_is_not_synchronized
+    # more_results_exist? is a pure server_status bitfield check (no socket I/O).
+    client = new_tcp_client
+    thread = Thread.new { client.query("SELECT SLEEP(1)") }
+    thread.join(0.2)
+
+    refute client.more_results_exist?
+
+    thread.join
+    client.close
+  end
+
   def test_server_info
     client = new_tcp_client
     server_info = client.server_info

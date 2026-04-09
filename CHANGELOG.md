@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
 
+### Fixed
+
+- Exclude `query_flags`, `query_flags=`, `warning_count`, and `more_results_exist?` from `Synchronization` mutex.
+
 ## 2.12.3
 
 ### Fixed

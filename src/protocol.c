@@ -273,9 +273,10 @@ int trilogy_parse_handshake_packet(const uint8_t *buff, size_t len, trilogy_hand
     if (out_packet->capabilities & TRILOGY_CAPABILITIES_SECURE_CONNECTION && auth_data_len > 8) {
         uint8_t remaining_auth_data_len = auth_data_len - 8;
 
-        // The auth plugins we support all provide exactly 21 bytes of
-        // auth_data. Reject any other values for auth_data_len.
-        if (SCRAMBLE_LEN + 1 != auth_data_len) {
+        // The auth plugins we support provide 21 bytes of auth_data, but some
+        // proxies and forks pad the field. Require at least the 21 bytes we need
+        // and take whatever the server sent.
+        if (auth_data_len < SCRAMBLE_LEN + 1) {
             return TRILOGY_PROTOCOL_VIOLATION;
         }
 

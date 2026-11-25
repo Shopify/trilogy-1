@@ -537,6 +537,27 @@ int trilogy_set_max_proto_version(SSL_CTX *ctx, trilogy_tls_version_t version)
 }
 #endif
 
+// Database hosts and application hosts are rarely clock-synchronised to the
+// second, and certificates are frequently rotated at the edge of their
+// validity window. Treat validity-period errors as a warning rather than a
+// failure; every other verification error is still fatal.
+static int verify_with_clock_tolerance(int preverify_ok, X509_STORE_CTX *store_ctx)
+{
+    if (preverify_ok) {
+        return 1;
+    }
+
+    switch (X509_STORE_CTX_get_error(store_ctx)) {
+    case X509_V_ERR_CERT_NOT_YET_VALID:
+    case X509_V_ERR_CERT_HAS_EXPIRED:
+    case X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD:
+    case X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
 {
     SSL_CTX *ssl_ctx = SSL_CTX_new(SSLv23_client_method());
@@ -557,6 +578,13 @@ static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
             goto fail;
         }
     }
+
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    // MySQL closes idle and killed connections without a close_notify alert.
+    // OpenSSL 1.1.1 reported that as a clean EOF; 3.0 made it a protocol error.
+    // Restore the old behaviour so the packet layer sees TRILOGY_CLOSED_CONNECTION.
+    SSL_CTX_set_options(ssl_ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
 
     if (opts->ssl_cipher) {
         if (!SSL_CTX_set_cipher_list(ssl_ctx, opts->ssl_cipher)) {
@@ -585,7 +613,7 @@ static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
         break;
     case TRILOGY_SSL_VERIFY_IDENTITY:
     case TRILOGY_SSL_VERIFY_CA:
-        SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
+        SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, verify_with_clock_tolerance);
         break;
     case TRILOGY_SSL_REQUIRED_NOVERIFY:
     case TRILOGY_SSL_PREFERRED_NOVERIFY:

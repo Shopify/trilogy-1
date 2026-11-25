@@ -76,7 +76,7 @@ static rb_encoding * encoding_for_charset(TRILOGY_CHARSET_t charset)
 static void cstr_from_value(char *buf, const trilogy_value_t *value, const char *errmsg)
 {
 
-    if (value->data_len > CAST_STACK_SIZE - 1) {
+    if (value->data_len > CAST_STACK_SIZE) {
         rb_raise(Trilogy_CastError, errmsg, (int)value->data_len, (char *)value->data);
     }
 

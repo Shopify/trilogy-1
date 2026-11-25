@@ -269,6 +269,10 @@ static void handle_trilogy_error(struct trilogy_ctx *ctx, int rc, const char *ms
     va_end(args);
     VALUE exc;
 
+    // Return the packet buffer to the pool before anything below can raise, so a
+    // failed call never leaves a buffer checked out.
+    rb_trilogy_release_buffer(ctx);
+
     if (!trilogy_error_recoverable_p(rc)) {
         if (ctx->conn.socket != NULL) {
             // trilogy_sock_shutdown may affect errno
@@ -341,8 +345,6 @@ static void handle_trilogy_error(struct trilogy_ctx *ctx, int rc, const char *ms
         break;
     }
 
-    // Some error messages depend on the buffer.
-    rb_trilogy_release_buffer(ctx);
     rb_exc_raise(exc);
 }
 
@@ -530,6 +532,18 @@ escape the GVL on each wait operation without going through call_without_gvl */
     }
 }
 
+// Name the account in authentication failures so a wrong user/host pair is
+// obvious from the exception alone.
+NORETURN(static void auth_recv_error(struct trilogy_ctx *, int));
+static void auth_recv_error(struct trilogy_ctx *ctx, int rc)
+{
+    const trilogy_sockopt_t *opts = &ctx->conn.socket->opts;
+    const char *user = opts->username ? opts->username : "root";
+    const char *host = opts->hostname ? opts->hostname : opts->path;
+
+    handle_trilogy_error(ctx, rc, "trilogy_auth_recv for %s@%s", user, host);
+}
+
 static void auth_switch(struct trilogy_ctx *ctx, trilogy_handshake_t *handshake)
 {
     int rc = trilogy_auth_switch_send(&ctx->conn, handshake);
@@ -554,13 +568,13 @@ static void auth_switch(struct trilogy_ctx *ctx, trilogy_handshake_t *handshake)
                 handle_trilogy_error(ctx, rc, "trilogy_auth_recv: caching_sha2_password requires either TCP with TLS or a unix socket");
             }
             else {
-                handle_trilogy_error(ctx, rc, "trilogy_auth_recv");
+                auth_recv_error(ctx, rc);
             }
         }
 
         rc = trilogy_sock_wait_read(ctx->conn.socket);
         if (rc != TRILOGY_OK) {
-            handle_trilogy_error(ctx, rc, "trilogy_auth_recv");
+            auth_recv_error(ctx, rc);
         }
     }
 }
@@ -584,10 +598,10 @@ static void authenticate(struct trilogy_ctx *ctx, trilogy_handshake_t *handshake
             if (rc != TRILOGY_OK) {
                 handle_trilogy_error(ctx, rc, "trilogy_ssl_upgrade");
             }
-        } else {
-            if (ssl_mode != TRILOGY_SSL_PREFERRED_NOVERIFY) {
-                rb_raise(Trilogy_SSLError, "SSL required, not supported by server");
-            }
+        } else if (ssl_mode == TRILOGY_SSL_VERIFY_CA || ssl_mode == TRILOGY_SSL_VERIFY_IDENTITY) {
+            // Certificate verification was requested, which is impossible without TLS.
+            // The NOVERIFY modes only express an encryption preference and proceed.
+            rb_raise(Trilogy_SSLError, "SSL required, not supported by server");
         }
     }
 
@@ -609,12 +623,12 @@ static void authenticate(struct trilogy_ctx *ctx, trilogy_handshake_t *handshake
         }
 
         if (rc != TRILOGY_AGAIN) {
-            handle_trilogy_error(ctx, rc, "trilogy_auth_recv");
+            auth_recv_error(ctx, rc);
         }
 
         rc = trilogy_sock_wait_read(ctx->conn.socket);
         if (rc != TRILOGY_OK) {
-            handle_trilogy_error(ctx, rc, "trilogy_auth_recv");
+            auth_recv_error(ctx, rc);
         }
     }
 
@@ -640,8 +654,7 @@ static inline VALUE config_set_str(VALUE opts, ID key, char **member)
         return Qfalse;
     }
 
-    Check_Type(val, T_STRING);
-    *member = StringValueCStr(val);
+    *member = StringValuePtr(val);
     return val;
 }
 

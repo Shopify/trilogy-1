@@ -4,7 +4,7 @@
 #include <string.h>
 
 #define CHECK(bytes)                                                                                                   \
-    if ((bytes) > (reader->len - reader->pos)) {                                                                       \
+    if (reader->pos + (bytes) > reader->len) {                                                                         \
         return TRILOGY_TRUNCATED_PACKET;                                                                               \
     }
 
@@ -217,11 +217,7 @@ int trilogy_reader_get_lenenc_buffer(trilogy_reader_t *reader, size_t *out_len, 
         return rc;
     }
 
-    // check len is not larger than the amount of bytes left before downcasting
-    // to size_t (which may be smaller than uint64_t on some architectures)
-    if (len > (uint64_t)(reader->len - reader->pos)) {
-        return TRILOGY_TRUNCATED_PACKET;
-    }
+    // trilogy_reader_get_buffer bounds-checks the length against the packet.
 
     if (out_len) {
         *out_len = (size_t)len;

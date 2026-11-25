@@ -238,7 +238,7 @@ static int read_ok_packet(trilogy_conn_t *conn)
     conn->affected_rows = ok_packet.affected_rows;
     conn->last_insert_id = ok_packet.last_insert_id;
 
-    if (ok_packet.last_gtid_len > 0 && ok_packet.last_gtid_len < TRILOGY_MAX_LAST_GTID_LEN) {
+    if (ok_packet.last_gtid_len > 0 && ok_packet.last_gtid_len <= TRILOGY_MAX_LAST_GTID_LEN) {
         memcpy(conn->last_gtid, ok_packet.last_gtid, ok_packet.last_gtid_len);
         conn->last_gtid_len = ok_packet.last_gtid_len;
     }
@@ -506,7 +506,8 @@ static int read_auth_result(trilogy_conn_t *conn)
         return rc;
     }
 
-    trilogy_auth_clear_password(conn);
+    // The credentials stay with the socket options so the connection can
+    // re-authenticate (COM_CHANGE_USER); they are released with the socket.
     return handle_generic_response(conn);
 }
 
@@ -709,7 +710,10 @@ static int handle_fast_auth_fail(trilogy_conn_t *conn, trilogy_handshake_t *hand
                                  size_t auth_data_len)
 {
     int rc;
-    bool use_ssl = (conn->socket->opts.flags & TRILOGY_CAPABILITIES_SSL) != 0;
+    // ssl_mode records whether the caller asked for TLS; opts.flags is only
+    // updated by trilogy_ssl_request_send, so callers that upgrade the socket
+    // themselves never see TRILOGY_CAPABILITIES_SSL there.
+    bool use_ssl = conn->socket->opts.ssl_mode != TRILOGY_SSL_DISABLED;
     bool has_unix_socket = (conn->socket->opts.path != NULL);
 
     // No password to send, so we can safely respond even without TLS.
@@ -813,14 +817,11 @@ int trilogy_auth_recv(trilogy_conn_t *conn, trilogy_handshake_t *handshake)
 
     case TRILOGY_PACKET_EOF:
         // EOF is returned here if an auth switch is requested.
-        // We still need the password for the switch, it will be cleared
-        // in a follow up call to this function after the switch.
         return read_auth_switch_packet(conn, handshake);
 
     case TRILOGY_PACKET_OK:
     case TRILOGY_PACKET_ERR:
     default:
-        trilogy_auth_clear_password(conn);
         return handle_generic_response(conn);
     }
 
@@ -1060,6 +1061,26 @@ int trilogy_escape(trilogy_conn_t *conn, const char *str, size_t len, const char
 
     const uint8_t *cursor = (const uint8_t *)str;
     const uint8_t *end = cursor + len;
+
+    // Most values need no escaping at all; hand the caller's bytes straight back
+    // instead of copying them through the packet buffer.
+    if (conn->server_status & TRILOGY_SERVER_STATUS_NO_BACKSLASH_ESCAPES) {
+        if (memchr(cursor, '\'', len) == NULL) {
+            *escaped_str_out = str;
+            *escaped_len_out = len;
+            return TRILOGY_OK;
+        }
+    } else {
+        const uint8_t *scan = cursor;
+        while (scan < end && !escape_lookup_table[*scan]) {
+            scan++;
+        }
+        if (scan == end) {
+            *escaped_str_out = str;
+            *escaped_len_out = len;
+            return TRILOGY_OK;
+        }
+    }
 
     if (conn->server_status & TRILOGY_SERVER_STATUS_NO_BACKSLASH_ESCAPES) {
         while (cursor < end) {

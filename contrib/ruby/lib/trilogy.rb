@@ -46,7 +46,9 @@ class Trilogy
     NEVER = { Object => :never }.freeze
     IMMEDIATE = { Object => :immediate }.freeze
 
-    synchronized_methods = Trilogy.public_instance_methods(false) - %i(closed? server_version)
+    # `escape` never touches the socket, it only transforms its argument, so it
+    # doesn't need the mutex.
+    synchronized_methods = Trilogy.public_instance_methods(false) - %i(closed? server_version escape)
     source = synchronized_methods.flat_map do |method|
       [
         "def #{method}(...)",
@@ -130,6 +132,11 @@ class Trilogy
 
   def connection_options
     @connection_options.dup.freeze
+  end
+
+  def inspect
+    target = @connection_options[:host] ? "#{@connection_options[:host]}:#{@connection_options[:port]}" : @connection_options[:socket]
+    "#<#{self.class} #{@connection_options[:username]}@#{target}/#{@connection_options[:database]}#{closed? ? " (closed)" : ""}>"
   end
 
   def in_transaction?

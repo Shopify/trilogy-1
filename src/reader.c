@@ -233,18 +233,16 @@ int trilogy_reader_get_lenenc_buffer(trilogy_reader_t *reader, size_t *out_len, 
 int trilogy_reader_get_string(trilogy_reader_t *reader, const char **out, size_t *out_len)
 {
     const uint8_t *pos = reader->buff + reader->pos;
+    size_t remaining = reader->len - reader->pos;
+    size_t len = strnlen((const char *)pos, remaining);
 
-    const uint8_t *end = memchr(pos, 0, reader->len - reader->pos);
-
-    if (!end) {
+    if (len == remaining) {
         return TRILOGY_TRUNCATED_PACKET;
     }
 
     if (out) {
         *out = (const char *)pos;
     }
-
-    size_t len = (size_t)(end - pos);
 
     if (out_len) {
         *out_len = len;

@@ -582,6 +582,7 @@ int trilogy_build_auth_packet(trilogy_builder_t *builder, const char *user, cons
     if (auth_response_len > 0) {
         CHECKED(trilogy_builder_write_buffer(builder, auth_response, auth_response_len));
     }
+    memset(auth_response, 0, sizeof(auth_response));
 
     if (database) {
         CHECKED(trilogy_builder_write_string(builder, database));
@@ -632,6 +633,7 @@ int trilogy_build_auth_switch_response_packet(trilogy_builder_t *builder, const 
             }
 
             CHECKED(trilogy_builder_write_buffer(builder, auth_response, auth_response_len));
+            memset(auth_response, 0, sizeof(auth_response));
         }
     }
 

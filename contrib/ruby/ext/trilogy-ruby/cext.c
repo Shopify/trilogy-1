@@ -257,7 +257,7 @@ static int trilogy_error_recoverable_p(int rc)
     // TRILOGY_MAX_PACKET_EXCEEDED is also recoverable as we do not send data when it occurs.
     // For other exceptions we will also close the socket to prevent further use, as the connection is probably in an
     // invalid state.
-    return rc == TRILOGY_ERR || rc == TRILOGY_MAX_PACKET_EXCEEDED;
+    return rc == TRILOGY_ERR || rc == TRILOGY_MAX_PACKET_EXCEEDED || rc == TRILOGY_TIMEOUT;
 }
 
 NORETURN(static void handle_trilogy_error(struct trilogy_ctx *, int, const char *, ...));
@@ -500,6 +500,9 @@ escape the GVL on each wait operation without going through call_without_gvl */
         close(newfd);
         return TRILOGY_ERR;
     }
+    if (opts->ssl_mode == TRILOGY_SSL_DISABLED) {
+        flags &= ~FD_CLOEXEC;
+    }
 
     if (fcntl(newfd, F_SETFD, flags) != 0){
         close(newfd);
@@ -663,6 +666,7 @@ static VALUE rb_trilogy_connect(VALUE self, VALUE raw_socket, VALUE encoding, VA
         Check_Type(val, T_FIXNUM);
         connopt.ssl_mode = (trilogy_ssl_mode_t)NUM2INT(val);
     }
+    connopt.enable_cleartext_plugin = connopt.ssl_mode == TRILOGY_SSL_DISABLED;
 
     if ((val = rb_hash_aref(opts, ID2SYM(id_connect_timeout))) != Qnil) {
         connopt.connect_timeout = double_to_timeval(NUM2DBL(val));

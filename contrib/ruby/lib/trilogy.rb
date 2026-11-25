@@ -34,6 +34,8 @@ class Trilogy
     if @encoding != str.encoding && !(str.ascii_only? && @encoding.ascii_compatible?) && str.encoding != ::Encoding::ASCII_8BIT
       str = str.encode(@encoding)
     end
+    str = str.dup if str.equal?(arg)
+    str.freeze
     _escape(str)
   end
 
@@ -73,7 +75,12 @@ class Trilogy
   def initialize(options = {})
     options[:port] = options[:port].to_i if options[:port]
     mysql_encoding = options[:encoding] || "utf8mb4"
-    @encoding = Trilogy::Encoding.find(mysql_encoding)
+    @encoding =
+      if options[:ssl] == false && mysql_encoding == "gbk"
+        ::Encoding.find("GBK")
+      else
+        Trilogy::Encoding.find(mysql_encoding)
+      end
     charset = Trilogy::Encoding.charset(mysql_encoding)
     @connection_options = options
     @connected_host = nil

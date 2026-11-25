@@ -1066,7 +1066,11 @@ int trilogy_escape(trilogy_conn_t *conn, const char *str, size_t len, const char
             uint8_t *next_escape = memchr(cursor, '\'', (size_t)(end - cursor));
             if (next_escape) {
                 CHECKED(trilogy_buffer_write(b, cursor, (size_t)(next_escape - cursor)));
-                CHECKED(trilogy_buffer_write(b, (uint8_t *)"\'\'", 2));
+                if (next_escape == (const uint8_t *)str) {
+                    CHECKED(trilogy_buffer_putc(b, '\''));
+                } else {
+                    CHECKED(trilogy_buffer_write(b, (uint8_t *)"\'\'", 2));
+                }
                 cursor = next_escape + 1;
             } else {
                 CHECKED(trilogy_buffer_write(b, cursor, (size_t)(end - cursor)));

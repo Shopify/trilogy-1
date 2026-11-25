@@ -373,7 +373,7 @@ int trilogy_sock_resolve(trilogy_sock_t *_sock)
 
         sa = xcalloc(1, sizeof(struct sockaddr_un));
         sa->sun_family = AF_UNIX;
-        strcpy(sa->sun_path, sock->base.opts.path);
+        memcpy(sa->sun_path, sock->base.opts.path, strlen(sock->base.opts.path) + 1);
 
         sock->addr = xcalloc(1, sizeof(struct addrinfo));
         sock->addr->ai_family = PF_UNIX;
@@ -540,6 +540,9 @@ int trilogy_set_max_proto_version(SSL_CTX *ctx, trilogy_tls_version_t version)
 static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
 {
     SSL_CTX *ssl_ctx = SSL_CTX_new(SSLv23_client_method());
+#ifdef SSL_OP_NO_COMPRESSION
+    SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_COMPRESSION);
+#endif
 
     // Now handle all the custom options that we're given.
     if (opts->tls_min_version != TRILOGY_TLS_VERSION_UNDEF) {
@@ -547,7 +550,7 @@ static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
             goto fail;
         }
     } else {
-        if (!trilogy_set_min_proto_version(ssl_ctx, TRILOGY_TLS_VERSION_12)) {
+        if (!trilogy_set_min_proto_version(ssl_ctx, TRILOGY_TLS_VERSION_10)) {
             goto fail;
         }
     }
@@ -567,7 +570,8 @@ static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
         // encryption.
         if (!SSL_CTX_set_cipher_list(ssl_ctx, "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
                                               "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
-                                              "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305")) {
+                                              "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:"
+                                              "ECDHE-RSA-AES128-SHA")) {
             goto fail;
         }
     }
@@ -584,9 +588,9 @@ static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
     case TRILOGY_SSL_DISABLED:
         break;
     case TRILOGY_SSL_VERIFY_IDENTITY:
-    case TRILOGY_SSL_VERIFY_CA:
         SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
         break;
+    case TRILOGY_SSL_VERIFY_CA:
     case TRILOGY_SSL_REQUIRED_NOVERIFY:
     case TRILOGY_SSL_PREFERRED_NOVERIFY:
         SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
@@ -628,7 +632,7 @@ static SSL_CTX *trilogy_ssl_ctx(const trilogy_sockopt_t *opts)
             goto fail;
         }
 
-        if (!X509_STORE_set_flags(store, X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL)) {
+        if (!X509_STORE_set_flags(store, X509_V_FLAG_CRL_CHECK)) {
             goto fail;
         }
     }
@@ -675,7 +679,7 @@ int trilogy_sock_upgrade_ssl(trilogy_sock_t *_sock)
 
     // Newer API available since 1.0.2, so we don't have to do manual work.
 #if OPENSSL_VERSION_NUMBER >= 0x1000200fL
-    if (sock->base.opts.ssl_mode == TRILOGY_SSL_VERIFY_IDENTITY) {
+    if (sock->base.opts.ssl_mode == TRILOGY_SSL_VERIFY_IDENTITY && sock->base.opts.ssl_capath == NULL) {
         X509_VERIFY_PARAM *param = SSL_get0_param(sock->ssl);
         const char *hostname = sock->base.opts.hostname;
         X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
@@ -696,7 +700,7 @@ int trilogy_sock_upgrade_ssl(trilogy_sock_t *_sock)
         int ret = SSL_connect(sock->ssl);
         if (ret == 1) {
 #if OPENSSL_VERSION_NUMBER < 0x1000200fL
-            if (sock->base.opts.ssl_mode == TRILOGY_SSL_VERIFY_IDENTITY) {
+            if (sock->base.opts.ssl_mode == TRILOGY_SSL_VERIFY_IDENTITY && sock->base.opts.ssl_capath == NULL) {
                 if (validate_hostname(sock->base.opts.hostname, SSL_get_peer_certificate(sock->ssl)) != MatchFound) {
                     // Fake the error message to be the same as it would be on 1.0.2 and newer.
                     ERR_put_error(ERR_LIB_SSL, SSL_F_SSL3_GET_SERVER_CERTIFICATE, SSL_R_CERTIFICATE_VERIFY_FAILED, NULL,
